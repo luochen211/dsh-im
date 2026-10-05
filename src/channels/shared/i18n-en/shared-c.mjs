@@ -56,6 +56,8 @@ export default {
     'Please finish the current question first, then reply exactly with 「批准」 (approve) or 「拒绝」 (reject).',
   '该审批已处理，无需再次回复。':
     'This approval has already been handled; no need to reply again.',
+  '审批已超时，已自动取消。':
+    'This approval timed out and was cancelled automatically.',
   'DeepSeek Harness 需要你的审批：':
     'DeepSeek Harness needs your approval:',
   '工具：{tool}': 'Tool: {tool}',

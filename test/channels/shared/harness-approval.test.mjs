@@ -973,3 +973,92 @@ test('synced approval uses the existing actor check and retires on a Web result'
   assert.equal(responses, 0);
   assert.match(notices.at(-1), /已拒绝/);
 });
+
+test('expires a displayed approval, releases the interaction, and reports the timeout', async () => {
+  const queue = new HarnessApprovalQueue({
+    approvalTimeoutMs: 25,
+    logger: { warn() {}, error() {} },
+  });
+  const sent = [];
+  const responses = [];
+  const context = {
+    key: 'direct:actor-a',
+    actor: 'actor-a',
+    send: async (text) => sent.push(text),
+  };
+  await queue.handleRequested(interaction({
+    id: 'timed-out',
+    toolName: 'bash',
+    respond: async (result) => responses.push(result),
+  }), context);
+
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  assert.equal(queue.hasPending(context.key), false);
+  assert.deepEqual(responses.map(({ value }) => value.outcome), ['rejected']);
+  assert.equal(sent.at(-1), '审批已超时，已自动取消。');
+  assert.equal(await queue.submitByApprovalId('timed-out', 'allowed-once', { actor: 'actor-a' }), false);
+});
+
+test('a timeout retires only its item and promotes the next queued approval once', async () => {
+  const queue = new HarnessApprovalQueue({
+    approvalTimeoutMs: 25,
+    logger: { warn() {}, error() {} },
+  });
+  const sent = [];
+  const responses = [];
+  const context = {
+    key: 'direct:actor-a',
+    actor: 'actor-a',
+    send: async (text) => sent.push(text),
+  };
+  await queue.handleRequested(interaction({
+    id: 'timed-out-first',
+    toolName: 'first-tool',
+    respond: async (result) => responses.push(result),
+  }), context);
+  await queue.handleRequested(interaction({
+    id: 'timed-out-second',
+    toolName: 'second-tool',
+    respond: async (result) => responses.push(result),
+  }), context);
+
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  assert.deepEqual(responses.map(({ value }) => value.approvalId), [
+    'timed-out-first',
+    'timed-out-second',
+  ]);
+  assert.equal(sent.filter((text) => text === '审批已超时，已自动取消。').length, 2);
+  assert.equal(queue.hasPending(context.key), false);
+});
+
+test('a duplicate reply racing timeout cannot submit or duplicate the timeout notice', async () => {
+  const queue = new HarnessApprovalQueue({
+    approvalTimeoutMs: 25,
+    logger: { warn() {}, error() {} },
+  });
+  const sent = [];
+  const responses = [];
+  const context = {
+    key: 'direct:actor-a',
+    actor: 'actor-a',
+    send: async (text) => sent.push(text),
+  };
+  await queue.handleRequested(interaction({
+    id: 'timed-out-race',
+    toolName: 'bash',
+    respond: async (result) => responses.push(result),
+  }), context);
+
+  const replies = await Promise.all([
+    new Promise((resolve) => setTimeout(() => resolve(
+      queue.claimReply({ ...context, text: '批准' }).process(),
+    ), 30)),
+    new Promise((resolve) => setTimeout(() => resolve(
+      queue.claimReply({ ...context, text: '批准' }).process(),
+    ), 40)),
+  ]);
+  await Promise.all(replies);
+  assert.equal(responses.length, 1);
+  assert.equal(responses[0].value.outcome, 'rejected');
+  assert.equal(sent.filter((text) => text === '审批已超时，已自动取消。').length, 1);
+});
